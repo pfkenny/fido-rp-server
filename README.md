@@ -40,7 +40,13 @@ Commit the changes:
     git remote add upstream https://github.com/pfkenny/fido-rp-server.git
     git pull -s recursive -X theirs upstream master
 
-### Step 4: Push changes
+### Step 4: Add the connection details to your IdentityX server
+
+Follow the steps at http://daoninc.github.io/fido-integration/#adminConsole to create your application configuration on the IdentityX server and to create your wrapping key, cert & token
+Once you have completed this task next copy the wrapping keystore and the credential.properties file to src/main/resources folder.
+Finally follow the steps at http://daoninc.github.io/fido-integration/#adminConsole section 9.1.2 to edit the src/main/resources/fido_config.properties file and set the connection details to the IdentityX FIDO Server
+
+### Step 5: Push changes
 
 The basic template is ready to be pushed:
 
@@ -51,7 +57,7 @@ The initial deployment (build and application startup) will take some time (up t
 	Tomcat started on port(s): 8080/http
 	Started Application in 125.511 seconds
 
-You can now browse to: https://fidorpsa-<namespace>.rhcloud.com/manage/health and you should see:
+You can now browse to: https://fidorpsa-yournamespace.rhcloud.com/manage/health and you should see:
 
 	{
 		"status": "UP"
