@@ -2,7 +2,7 @@
 <configuration>
 
 	<appender name="FILE-LOG" class="ch.qos.logback.core.rolling.RollingFileAppender">
-		<file>${logging.file.dir}/Relying_Party.log</file>
+		<file>${OPENSHIFT_LOG_DIR}Relying_Party.log</file>
 		<encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
 			<Pattern>
 				%date [%10.10thread] [%5.5level] [%36.36logger] - %msg%n
@@ -11,7 +11,7 @@
 
 		<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
 			<!-- rollover daily -->
-			<fileNamePattern>Relying_Party_Debug.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+			<fileNamePattern>${OPENSHIFT_LOG_DIR}Relying_Party_Debug.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
 			<timeBasedFileNamingAndTriggeringPolicy	class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
 				<maxFileSize>10MB</maxFileSize>
 			</timeBasedFileNamingAndTriggeringPolicy>
