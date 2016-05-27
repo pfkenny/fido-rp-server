@@ -50,6 +50,8 @@ Finally follow the steps at http://daoninc.github.io/fido-integration/#adminCons
 
 The basic template is ready to be pushed:
 
+	git add -A
+	git commit -am "Added FIDO RPSA"
 	git push
 
 The initial deployment (build and application startup) will take some time (up to several minutes). Subsequent deployments are a bit faster, although starting Spring Boot application may take even more than 2 minutes on small Gear:
