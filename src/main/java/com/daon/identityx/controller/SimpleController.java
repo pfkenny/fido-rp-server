@@ -21,9 +21,12 @@ import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.util.Arrays;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
@@ -35,6 +38,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.client.HttpClientErrorException;
 
 import com.daon.identityx.controller.model.AuthenticationMethod;
 import com.daon.identityx.controller.model.AuthenticatorInfo;
@@ -50,6 +54,7 @@ import com.daon.identityx.controller.model.CreateTransactionAuthRequest;
 import com.daon.identityx.controller.model.DeleteAccountResponse;
 import com.daon.identityx.controller.model.Error;
 import com.daon.identityx.controller.model.GetAuthenticatorResponse;
+import com.daon.identityx.controller.model.GetPolicyResponse;
 import com.daon.identityx.controller.model.ListAuthenticatorsResponse;
 import com.daon.identityx.controller.model.ValidateTransactionAuth;
 import com.daon.identityx.controller.model.ValidateTransactionAuthResponse;
@@ -90,6 +95,9 @@ public class SimpleController {
 	@Autowired
 	private IIdentityXServices identityXServices;
 
+	@Value("${fido.session_period:900000}")
+	private long sessionPeriod;
+
 	private SecureRandom random;
 
 	/***
@@ -106,6 +114,21 @@ public class SimpleController {
 
 		logger.error("An exception occurred while attempting to process the request.  Exception: " + ex.getError());
 		return ex.getError();
+	}
+
+	/**
+	 * The a web method throws an exception with a http status, then we controller will pass this detail
+	 * back to the client.
+	 * 
+	 * @param ex
+	 * @return
+	 */
+	@ExceptionHandler(HttpClientErrorException.class)
+	@ResponseBody
+	public Error handleHttpExceptions(HttpClientErrorException ex, HttpServletResponse response) {
+		logger.error("An unexpected exception occurred while attempting to process the request. Exception: " + ex.getMessage());
+		response.setStatus(ex.getStatusCode().value());
+		return new Error(ex.getStatusCode().value(), ex.getStatusText());
 	}
 
 	/***
@@ -182,7 +205,7 @@ public class SimpleController {
 		try {
 
 			newAccount = this.getAccountRepository().save(newAccount);
-			Session aSession = new Session(newAccount);
+			Session aSession = new Session(newAccount, sessionPeriod);
 			aSession = this.getSessionRepository().save(aSession);
 
 			CreateAccountResponse createAccountResponse = new CreateAccountResponse();
@@ -571,6 +594,34 @@ public class SimpleController {
 		}
 	}
 
+	@RequestMapping(value = "policies/{id}", method = RequestMethod.GET, consumes = { "application/json" })
+	@ResponseStatus(HttpStatus.OK)
+	public @ResponseBody GetPolicyResponse getPolicy(@RequestHeader("Session-Id") String sessionId, @PathVariable("id") String id) {
+
+		logger.info("***** Received request to get the policy: {} for session: {} ", id, sessionId);
+		long start = System.currentTimeMillis();
+		Audit anAudit = new Audit(AuditAction.GET_POLICY);
+		try {
+			Session session = this.validateSession(sessionId);
+			Account account = this.getAccountRepository().findById(session.getAccountId());
+			anAudit.setAccountId(account.getId());
+			GetPolicyResponse res = new GetPolicyResponse();
+			if (id.equalsIgnoreCase("reg")) {
+				res.setPolicyInfo(getIdentityXServices().getRegistrationPolicyInfo());
+			} else if (id.equalsIgnoreCase("auth")) {
+				res.setPolicyInfo(getIdentityXServices().getAuthenticationPolicyInfo());
+			} else {
+				throw new HttpClientErrorException(HttpStatus.NOT_FOUND, "Policy " + id);
+			}
+			return res;
+		} finally {
+			anAudit.setDuration(System.currentTimeMillis() - start);
+			anAudit.setCreatedDTM(new Timestamp(System.currentTimeMillis()));
+			this.getAuditRepository().save(anAudit);
+			logger.info("***** Sending response to the request to getPolicy - duration: {}ms", (System.currentTimeMillis() - start));
+		}
+	}
+
 	/***
 	 * Validate the session to ensure there is a session with the provided ID and the session has not expired
 	 * 
@@ -693,7 +744,7 @@ public class SimpleController {
 	 * @return
 	 */
 	protected CreateSessionResponse createSession(Account account, AuthenticationMethod authMethod) {
-		Session session = new Session(account);
+		Session session = new Session(account, sessionPeriod);
 		this.getSessionRepository().save(session);
 		CreateSessionResponse response = new CreateSessionResponse();
 		response.setSessionId(session.getId());

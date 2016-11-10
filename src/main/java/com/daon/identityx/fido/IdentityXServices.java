@@ -31,9 +31,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.PropertySource;
+import org.springframework.context.annotation.PropertySources;
 import org.springframework.stereotype.Service;
 
 import com.daon.identityx.controller.model.AuthenticatorInfo;
+import com.daon.identityx.controller.model.PolicyInfo;
 import com.daon.identityx.exception.ProcessingException;
 import com.daon.identityx.rest.model.def.AuthenticationRequestStatusEnum;
 import com.daon.identityx.rest.model.def.AuthenticatorStatusEnum;
@@ -46,6 +48,8 @@ import com.daon.identityx.rest.model.pojo.Policy;
 import com.daon.identityx.rest.model.pojo.Registration;
 import com.daon.identityx.rest.model.pojo.RegistrationChallenge;
 import com.daon.identityx.rest.model.pojo.User;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.identityx.clientSDK.TenantRepoFactory;
 import com.identityx.clientSDK.collections.ApplicationCollection;
 import com.identityx.clientSDK.collections.AuthenticatorCollection;
@@ -75,7 +79,10 @@ import com.identityx.clientSDK.repositories.UserRepository;
  *
  */
 @Service
-@PropertySource("classpath:fido_config.properties")
+@PropertySources({
+	@PropertySource("classpath:fido_config.properties"),
+	@PropertySource(value="file:fido_config.properties", ignoreResourceNotFound=true)
+})
 public class IdentityXServices implements IIdentityXServices {
 
 	private static final Logger logger = LoggerFactory.getLogger(IdentityXServices.class);
@@ -101,8 +108,9 @@ public class IdentityXServices implements IIdentityXServices {
 	
 	private TenantRepoFactory tenantRepoFactory;
 	private Application application;
-	private Policy regPolicy;
-	private Policy authPolicy;
+	private String regPolicyHref;
+	private String authPolicyHref;
+	private ObjectMapper objectMapper = new ObjectMapper();
 
 	private final Map<String, AuthenticatorType> authenticatorTypesCache = new Hashtable<>();
 	
@@ -141,9 +149,9 @@ public class IdentityXServices implements IIdentityXServices {
 		}
 
 		try {
-			logger.info("Attempting to find the registration policy policy: {}", this.getRegPolicyId());
-			Policy aPolicy = this.findPolicy(this.getRegPolicyId());
-			this.setRegPolicy(aPolicy);
+			logger.info("Attempting to find the registration policy: {}", this.getRegPolicyId());
+			Policy aPolicy = this.findPolicy(getRegPolicyId());
+			this.setRegPolicyHref(aPolicy.getHref());
 			logger.info("Found the registration policy.");
 		} catch (IdxRestException ex) {
 			String error = "An exception occurred while attempting to find the registration policy: " + this.getRegPolicyId()
@@ -154,8 +162,8 @@ public class IdentityXServices implements IIdentityXServices {
 
 		try {
 			logger.info("Attempting to find the authentication policy: {}", this.getAuthPolicyId());
-			Policy aPolicy = this.findPolicy(this.getAuthPolicyId());
-			this.setAuthPolicy(aPolicy);
+			Policy aPolicy = this.findPolicy(getAuthPolicyId());
+			this.setAuthPolicyHref(aPolicy.getHref());
 			logger.info("Found the authentication policy.");
 		} catch (IdxRestException ex) {
 			String error = "An exception occurred while attempting to find the authentication policy: " + this.getAuthPolicyId()
@@ -402,7 +410,7 @@ public class IdentityXServices implements IIdentityXServices {
 
 		try {
 			AuthenticationRequest request = new AuthenticationRequest();
-			request.setPolicy(this.getAuthPolicy());
+			request.setPolicy(new Policy(this.getAuthPolicyHref()));
 			request.setApplication(this.getApplication());
 			request.setDescription("Test transaction");
 			request.setType(FIDO_AUTHENTICATION_TYPE);
@@ -441,7 +449,7 @@ public class IdentityXServices implements IIdentityXServices {
 				throw new RuntimeException(error);
 			}
 			AuthenticationRequest request = new AuthenticationRequest();
-			request.setPolicy(this.getAuthPolicy());
+			request.setPolicy(new Policy(this.getAuthPolicyHref()));
 			request.setApplication(this.getApplication());
 			request.setDescription("Test transaction");
 			request.setType(FIDO_AUTHENTICATION_TYPE);
@@ -574,7 +582,15 @@ public class IdentityXServices implements IIdentityXServices {
 	 */
 	@Override
 	public FIDOFacets getFidoFacets() {
-		return this.getApplication().getFidoFacets();
+		Application app;
+		try {
+			app = this.findApplication();
+		} catch (IdxRestException e) {
+			String error = "Application could not be found";
+			logger.error(error);
+			throw new RuntimeException(error);
+		}
+		return app.getFidoFacets();
 	}
 
 	
@@ -611,6 +627,29 @@ public class IdentityXServices implements IIdentityXServices {
 	}
 
 
+	@Override
+	public PolicyInfo getRegistrationPolicyInfo() {
+		try {
+			return this.convert(getPolicy(getRegPolicyHref()));
+		} catch (IdxRestException ex) {
+			String error = "An exception occurred while attempting to retrieve the registration policy.  Exception: " + ex.getMessage();
+			logger.error(error, ex);
+			throw new RuntimeException(error, ex);
+		}
+	}
+
+	@Override
+	public PolicyInfo getAuthenticationPolicyInfo() {
+		try {
+			return this.convert(getPolicy(getAuthPolicyHref()));
+		} catch (IdxRestException ex) {
+			String error = "An exception occurred while attempting to retrieve the authentication policy.  Exception: " + ex.getMessage();
+			logger.error(error, ex);
+			throw new RuntimeException(error, ex);
+		}
+	}
+
+
 	/***
 	 * Find the application within IdentityX where the is retrieved from the "applicationId" property.
 	 * Uses an ApplicationRepositity and performs a "list" operation.
@@ -633,6 +672,20 @@ public class IdentityXServices implements IIdentityXServices {
 		default:
 			throw new RuntimeException("More than one application with the same ApplicationId!!!!");
 		}
+	}
+
+	/***
+	 * Uses the specified policyHref to get the policy as not all content will 
+	 * be provided in the list operation. For instance, the fido policy itself will 
+	 * not be present unless the policy is retrieved in a GET operation.
+	 * 
+	 * @param policyHref
+	 * @return
+	 * @throws IdxRestException
+	 */
+	protected Policy getPolicy(String policyHref) throws IdxRestException {
+		PolicyRepository policyRepo = this.getTenantRepoFactory().getPolicyRepo();
+		return policyRepo.get(policyHref);
 	}
 
 	/***
@@ -671,7 +724,7 @@ public class IdentityXServices implements IIdentityXServices {
 		RegistrationChallengeRepository regChallengeRepository = this.getTenantRepoFactory().getRegistrationChallengeRepo();
 		RegistrationChallenge regChallenge = new RegistrationChallenge();
 		regChallenge.setRegistration(reg);
-		regChallenge.setPolicy(this.getRegPolicy());
+		regChallenge.setPolicy(new Policy(this.getRegPolicyHref()));
 		regChallenge = regChallengeRepository.create(regChallenge);
 		logger.debug("Added a registration challenge for Registration with registrationId: {}, - regChallengeId: {}", reg.getRegistrationId(), regChallenge.getId());
 		return regChallenge;
@@ -918,6 +971,23 @@ public class IdentityXServices implements IIdentityXServices {
 		return authenticatorInfo;
 	}
 
+	protected PolicyInfo convert(Policy policy) {
+
+		PolicyInfo policyInfo = new PolicyInfo();
+		policyInfo.setId(policy.getId());
+		policyInfo.setType(policy.getType().toString());
+		if (policy.getFidoPolicy() != null) {
+			try {
+				policyInfo.setPolicy(objectMapper.writeValueAsString(policy.getFidoPolicy()));
+			} catch (JsonProcessingException e) {
+				String error = "An exception occurred while attempting to convert a FIDO policy object to a string";
+				logger.error(error, e);
+				throw new RuntimeException(error, e); 
+			}
+		}
+		return policyInfo;
+	}
+
 	public String getApplicationId() {
 		return applicationId;
 	}
@@ -954,20 +1024,20 @@ public class IdentityXServices implements IIdentityXServices {
 		this.application = application;
 	}
 
-	public Policy getRegPolicy() {
-		return regPolicy;
+	public String getRegPolicyHref() {
+		return regPolicyHref;
 	}
 
-	public void setRegPolicy(Policy regPolicy) {
-		this.regPolicy = regPolicy;
+	public void setRegPolicyHref(String regPolicyHref) {
+		this.regPolicyHref = regPolicyHref;
 	}
 
-	public Policy getAuthPolicy() {
-		return authPolicy;
+	public String getAuthPolicyHref() {
+		return authPolicyHref;
 	}
 
-	public void setAuthPolicy(Policy authPolicy) {
-		this.authPolicy = authPolicy;
+	public void setAuthPolicyHref(String authPolicyHref) {
+		this.authPolicyHref = authPolicyHref;
 	}
 
 	public Application getApplication() {

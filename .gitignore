@@ -1,6 +1,11 @@
+<<<<<<< HEAD
 .c9
 target
 *.iml
 *.ipr
 *.iws
 *.bak
+=======
+*.bak
+/target/
+>>>>>>> refs/remotes/daoninc/master
